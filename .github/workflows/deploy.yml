@@ -1,0 +1,128 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - .gitignore
+      - README.md
+      - CONTRIBUTING.md
+      - LICENSE
+
+  workflow_dispatch:  # Manual trigger for emergency deployment
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: true
+
+jobs:
+  test:
+  name: Run Tests and Linters
+  runs-on: ubuntu-latest
+  timeout-minutes: 5  # Optional: fail fast if job hangs
+
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Run linters
+      run: npm run lint
+
+    - name: Run all scripts in script/**
+      run: |
+        for script in script/*.js; do
+          echo "Running $script"
+          node "$script"
+        done
+
+    - name: Run url-checker.js with timeout
+      run: |
+        echo "Running url-checker.js with timeout"
+        node script/url-checker.js
+      env:
+        URL_CHECKER_TIMEOUT: 10  # reasonable timeout in seconds
+
+    - name: Cache node_modules
+      uses: actions/cache@v4
+      with:
+        path: node_modules
+        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-
+
+
+  build:
+    build:
+  name: Build Static Pages
+  runs-on: ubuntu-latest
+  needs: test  # Ensures test job ran and succeeded
+
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup GitHub Pages
+      uses: actions/configure-pages@v4
+
+    - name: Set PATH_PREFIX
+      run: echo "PATH_PREFIX=/$(basename ${{ github.repository }})/" >> $GITHUB_ENV
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Build static site with 11ty
+      run: npm run build
+
+    - name: Upload _site as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: static-site
+        path: _site
+
+    - name: Cache node_modules
+      uses: actions/cache@v4
+      with:
+        path: node_modules
+        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-
+
+  deploy:
+    deploy:
+  name: Deploy to GitHub Pages
+  runs-on: ubuntu-latest
+  needs: build  # Ensures test and build jobs succeeded
+
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup GitHub CLI
+      uses: cli/cli-action@v2
+
+    - name: Deploy to GitHub Pages
+      uses: actions/deploy-pages@v4
+
+    - name: Report deployment status via GitHub issue
+      run: |
+        DATE=$(date +'%Y-%m-%d')
+        STATUS="succeeded"
+        URL="https://your-org.github.io/your-repo/"  # Replace with actual knowledge base URL
+
+        gh issue create \
+          --title "$DATE - Deployment: $STATUS" \
+          --body "URL: $URL" \
+          --repo ${{ github.repository }}
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
