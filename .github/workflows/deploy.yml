@@ -150,8 +150,10 @@ jobs:
             echo "ISSUE_TITLE=${{ env.DATE }} - Deployment Failed" >> $GITHUB_ENV
           fi
 
-      - name: Setup GitHub CLI
-        uses: cli/cli-action@v2
+      - name: Install GitHub CLI
+        run: |
+          sudo apt update
+          sudo apt install gh -y
 
       - name: Create summary issue
         env:
